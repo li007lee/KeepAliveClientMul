@@ -11,6 +11,8 @@
 #include "event2/event_struct.h"
 #include "event2/event.h"
 
+extern HB_CHAR cSlaveIp[16];
+
 HB_VOID recv_msg_from_keepalive_server_cb(struct bufferevent *pbevConnectToKeepAliveServer, HB_HANDLE hArg);
 static HB_VOID connect_to_keepalive_server(evutil_socket_t fd, short events, void *arg);
 HB_VOID connect_to_master_server(evutil_socket_t fd, HB_S16 events, HB_HANDLE hArg);
@@ -63,7 +65,7 @@ HB_VOID connect_to_keepalive_server_cb(struct bufferevent *pbevConnectToKeepAliv
 			struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
 			pEventArgs->pConnectToKeepAliveServerEvent = event_new(pEventArgs->pEventBase, -1, 0, connect_to_keepalive_server, pEventArgs);
 			event_add(pEventArgs->pConnectToKeepAliveServerEvent, &tv);
-//			printf("connect to keep alive server failed! reconnect End!\n");
+			printf("connect to keep alive server failed! reconnect End!\n");
 		}
 	}
 }
@@ -71,16 +73,27 @@ HB_VOID connect_to_keepalive_server_cb(struct bufferevent *pbevConnectToKeepAliv
 static HB_VOID connect_to_keepalive_server(evutil_socket_t fd, short events, void *hArg)
 {
 	EVENT_ARGS_HANDLE pEventArgs = (EVENT_ARGS_HANDLE)hArg;
-	struct timeval tvConnectTimeOut = {5, 0}; //5s连接超时
+
 
 	if (NULL != pEventArgs->pConnectToKeepAliveServerEvent)
 	{
+		printf("Del pConnectToKeepAliveServerEvent\n");
 		event_del(pEventArgs->pConnectToKeepAliveServerEvent);
 		event_free(pEventArgs->pConnectToKeepAliveServerEvent);
 		pEventArgs->pConnectToKeepAliveServerEvent = NULL;
 	}
 
-	struct bufferevent *pbevConnectToKeepAliveServer = bufferevent_socket_new(pEventArgs->pEventBase, -1, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | BEV_OPT_THREADSAFE);
+	HB_S32 iConnectToKeepAliveServerFd = socket(AF_INET,SOCK_STREAM,0);//返回-1表示失败;
+	struct sockaddr_in stConnectToKeepAliveServerAddr1;
+	HB_S32 iSize = sizeof(struct sockaddr_in);
+
+	bzero(&stConnectToKeepAliveServerAddr1,sizeof(stConnectToKeepAliveServerAddr1));
+	stConnectToKeepAliveServerAddr1.sin_family = AF_INET;
+	stConnectToKeepAliveServerAddr1.sin_port = htons(0); //服务器绑定的端口
+	stConnectToKeepAliveServerAddr1.sin_addr.s_addr = inet_addr(cSlaveIp);//服务器的IP地址
+	bind(iConnectToKeepAliveServerFd,(struct sockaddr*)&stConnectToKeepAliveServerAddr1,iSize);//返回-1表示失败
+
+	struct bufferevent *pbevConnectToKeepAliveServer = bufferevent_socket_new(pEventArgs->pEventBase, iConnectToKeepAliveServerFd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | BEV_OPT_THREADSAFE);
 	struct sockaddr_in stConnectToKeepAliveServerAddr;
 	bzero(&stConnectToKeepAliveServerAddr, sizeof(stConnectToKeepAliveServerAddr));
 	stConnectToKeepAliveServerAddr.sin_family = AF_INET;
@@ -91,6 +104,7 @@ static HB_VOID connect_to_keepalive_server(evutil_socket_t fd, short events, voi
 	bufferevent_setcb(pbevConnectToKeepAliveServer, recv_msg_from_keepalive_server_cb, NULL, connect_to_keepalive_server_cb, pEventArgs);
 	bufferevent_socket_connect(pbevConnectToKeepAliveServer, (struct sockaddr*) &stConnectToKeepAliveServerAddr, sizeof(struct sockaddr_in));
 	bufferevent_enable(pbevConnectToKeepAliveServer, EV_READ | EV_WRITE);
+	struct timeval tvConnectTimeOut = {5, 0}; //5s连接超时
 	bufferevent_set_timeouts(pbevConnectToKeepAliveServer, NULL, &tvConnectTimeOut);
 }
 
@@ -122,11 +136,7 @@ static HB_VOID send_heartbate_err_cb(struct bufferevent *pbevConnectToKeepAliveS
 		event_free(pEventArgs->pHeartBeatTimerEvent);
 		pEventArgs->pHeartBeatTimerEvent = NULL;
 	}
-	if(NULL != pEventArgs->pConnectToKeepAliveServerBev)
-	{
-		bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
-		pEventArgs->pConnectToKeepAliveServerBev = NULL;
-	}
+
 	struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
 	pEventArgs->pConnectToKeepAliveServerEvent = event_new(pEventArgs->pEventBase, -1, 0, connect_to_keepalive_server, pEventArgs);
 	event_add(pEventArgs->pConnectToKeepAliveServerEvent, &tv);
@@ -140,23 +150,19 @@ static HB_VOID send_heartbeat(evutil_socket_t fd, short events, HB_HANDLE hArg)
 	HB_CHAR cSendBuf[512] = {0};
 	CMD_HEADER_OBJ stCmdHeader;
 	memset(&stCmdHeader, 0, sizeof(CMD_HEADER_OBJ));
+
 	stCmdHeader.cmd_format = E_CMD_JSON;
 	stCmdHeader.cmd_func = E_BOX_KEEP_ALIVE;
 	strncpy(stCmdHeader.header, "BoxKeepAlive@yDt", 16);
-
 	snprintf(cSendBuf+sizeof(CMD_HEADER_OBJ), sizeof(cSendBuf)-sizeof(CMD_HEADER_OBJ), "{\"HeartBeat\":\"keep_alive\",\"DevId\":\"%s\"}", pEventArgs->cDevId);
-
 	stCmdHeader.cmd_length = strlen(cSendBuf+sizeof(CMD_HEADER_OBJ));
 	memcpy(cSendBuf, &stCmdHeader, sizeof(CMD_HEADER_OBJ));
 
-	if (pConnectToKeepAliveServerBev != NULL)
-	{
-		struct timeval tvRecvTimeOut = {5, 0}; //设置读超时
-		bufferevent_setcb(pConnectToKeepAliveServerBev, recv_msg_from_keepalive_server_cb, NULL, send_heartbate_err_cb, pEventArgs);
-		bufferevent_write(pConnectToKeepAliveServerBev, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
-		bufferevent_enable(pConnectToKeepAliveServerBev, EV_READ | EV_WRITE);
-		bufferevent_set_timeouts(pConnectToKeepAliveServerBev, &tvRecvTimeOut, NULL);
-	}
+	bufferevent_setcb(pConnectToKeepAliveServerBev, recv_msg_from_keepalive_server_cb, NULL, send_heartbate_err_cb, pEventArgs);
+	bufferevent_write(pConnectToKeepAliveServerBev, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
+	bufferevent_enable(pConnectToKeepAliveServerBev, EV_READ | EV_WRITE);
+	struct timeval tvRecvTimeOut = {5, 0}; //设置读超时
+	bufferevent_set_timeouts(pConnectToKeepAliveServerBev, &tvRecvTimeOut, NULL);
 }
 
 //用于接收注册成功或失败的结果信息
@@ -204,24 +210,14 @@ HB_VOID recv_msg_from_keepalive_server_cb(struct bufferevent *pbevConnectToKeepA
 				{
 					cJSON *pMsg = cJSON_GetObjectItem(pRoot, "Msg");
 					TRACE_ERR("E_BOX_REGIST_ALIVE_SERVER_REPLY regist failed : [%s]\n", pMsg->valuestring);
-
+					cJSON_Delete(pRoot);
 					iErrCode = -1;
-//					bufferevent_free(pbevConnectToKeepAliveServer);
-//					pbevConnectToKeepAliveServer = NULL;
-//					if (NULL != pEventArgs->pConnectToKeepAliveServerBev)
-//					{
-//						bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
-//						pEventArgs->pConnectToKeepAliveServerBev = NULL;
-//					}
-//					struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
-//					pEventArgs->pConnectToKeepAliveServerEvent = event_new(pEventArgs->pEventBase, -1, 0, connect_to_keepalive_server, pEventArgs);
-//					event_add(pEventArgs->pConnectToKeepAliveServerEvent, &tv);
 					break;
 				}
+				cJSON_Delete(pRoot);
 				TRACE_LOG("Registe to Slave succeed! id=[%s]\n", pEventArgs->cDevId);
 	//			注册成功，创建定时器，定时发送心跳包
 				struct timeval tv = {HEARTBATE_TIME_VAL, 0};
-//				printf("E_BOX_REGIST_ALIVE_SERVER_REPLY recv reponse :[%s]\n", cRecvBuf+sizeof(CMD_HEADER_OBJ));
 				pEventArgs->pHeartBeatTimerEvent = event_new(pEventArgs->pEventBase, -1, EV_READ | EV_PERSIST, send_heartbeat, pEventArgs);
 				event_add(pEventArgs->pHeartBeatTimerEvent, &tv);
 			}
@@ -236,7 +232,8 @@ HB_VOID recv_msg_from_keepalive_server_cb(struct bufferevent *pbevConnectToKeepA
 					cJSON *pMsg = cJSON_GetObjectItem(pRoot, "Msg");
 					TRACE_ERR("E_BOX_KEEP_ALIVE_REPLY recv heartbeat failed : [%s]\n", pMsg->valuestring);
 				}
-	//			printf("E_BOX_KEEP_ALIVE_REPLY recv reponse :[%s]\n", cRecvBuf+sizeof(CMD_HEADER_OBJ));
+				cJSON_Delete(pRoot);
+//				printf("E_BOX_KEEP_ALIVE_REPLY recv reponse :[%s]\n", cRecvBuf+sizeof(CMD_HEADER_OBJ));
 				bufferevent_set_timeouts(pbevConnectToKeepAliveServer, NULL, NULL);
 			}
 			break;
@@ -326,11 +323,13 @@ static HB_VOID recv_msg_from_master_server_cb(struct bufferevent *pbevConnectToM
 				}
 				else
 				{
+					cJSON_Delete(pRoot);
 					TRACE_ERR("从Master获取Slave失败!\n");
 					iErrCode = -1;
 					break;
 				}
 
+				cJSON_Delete(pRoot);
 				TRACE_LOG("%d从Master获取Slave地址成功 recv reponse :[%s]\n", ++iNum, cRecvBuf+sizeof(CMD_HEADER_OBJ));
 				pEventArgs->iKeepAliveServerPort = SLAVE_SERVER_KEEP_ALAVE_PORT;
 //				connect_to_keepalive_server();
@@ -373,7 +372,7 @@ static HB_VOID connect_to_master_server_cb(struct bufferevent *pbevConnectToKeep
 		stCmdHeader.cmd_length = strlen(cSendBuf+sizeof(CMD_HEADER_OBJ));
 		memcpy(cSendBuf, &stCmdHeader, sizeof(CMD_HEADER_OBJ));
 
-//		printf("++++++++++++++++++++++++Send to Master : [%s]\n", cSendBuf+sizeof(CMD_HEADER_OBJ));
+		printf("++++++++++++++++++++++++Send to Master : [%s]\n", cSendBuf+sizeof(CMD_HEADER_OBJ));
 		//连接成功发送注册消息
 		bufferevent_write(pbevConnectToKeepAliveServer, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
 	}
@@ -406,7 +405,7 @@ HB_VOID connect_to_master_server(evutil_socket_t fd, HB_S16 events, HB_HANDLE hA
 	stConnectToMasterServerAddr.sin_family = AF_INET;
 	stConnectToMasterServerAddr.sin_port = htons(MASTER_SERVER_PORT);
 	inet_pton(AF_INET, MASTER_SERVER_IP, (void *) &stConnectToMasterServerAddr.sin_addr);
-//	printf("############ Connect to master ServerIp[%s], ServerPort[%d]\n", MASTER_SERVER_IP, MASTER_SERVER_PORT);
+	printf("############ Connect to master ServerIp[%s], ServerPort[%d]\n", MASTER_SERVER_IP, MASTER_SERVER_PORT);
 
 	bufferevent_setcb(pbevConnectToMasterServer, recv_msg_from_master_server_cb, NULL, connect_to_master_server_cb, pEventArgs);
 	bufferevent_socket_connect(pbevConnectToMasterServer, (struct sockaddr*) &stConnectToMasterServerAddr, sizeof(struct sockaddr_in));
@@ -453,7 +452,8 @@ HB_S32 random_number(HB_U32 threadSelfId, HB_S32 start_num, HB_S32 end_num)
 	HB_S32 ret_num = 0;
 	srand(threadSelfId);
 	ret_num = rand() % (end_num - start_num) + start_num;
-	return ret_num;
+//	return ret_num;
+	return 0;
 }
 
 
@@ -472,7 +472,7 @@ static void timeout_cb(evutil_socket_t fd, short event, void *arg)
 	tv.tv_sec = 10;
 	tv.tv_usec = 0;
 	event_add(timeout, &tv);
-	printf("\n#######    work thread base   total events = %d   \n", total_events_num);
+	printf("\n#######   Base:[%p] work thread base   total events = %d   \n", base, total_events_num);
 }
 
 HB_VOID *start_keep_alive_base(HB_HANDLE hArg)

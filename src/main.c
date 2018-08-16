@@ -10,6 +10,8 @@
 #include "dev_opt.h"
 
 //GLOBLE_PARAM_OBJ glParam;
+HB_CHAR cSlaveIp[16] = {0};
+
 
 HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 {
@@ -18,13 +20,14 @@ HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 	HB_S32 iClientNums = 0;
 	if (argc < 3)
 	{
-		printf("Usage: ./heartbeat_client_X64 [Base个数] [每个Base中的客户端个数]\n\n");
+		printf("Usage: ./heartbeat_client_X64 [SlaveIp] [Base个数] [每个Base中的客户端个数]\n\n");
 		return -1;
 	}
 	else
 	{
-		iBaseNums = atoi(argv[1]);
-		iClientNums = atoi(argv[2]);
+		strncpy(cSlaveIp, argv[1], sizeof(cSlaveIp));
+		iBaseNums = atoi(argv[2]);
+		iClientNums = atoi(argv[3]);
 	}
 
 	printf("----------------------------------------------------------------\n");
@@ -46,6 +49,7 @@ HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 		TRACE_ERR("########## evthread_use_pthreads() err !");
 		return HB_FAILURE;
 	}
+
 
 //	memset(&glParam, 0, sizeof(glParam));
 //	glParam.pEventBase = event_base_new();

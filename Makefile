@@ -22,7 +22,7 @@ CFLAGS = -Wall -O2 -g
 INC_PATH = -I./inc
 LIBS :=  -L./lib/X86_64 -levent -levent_pthreads -lm -ldl -lpthread -lrt
 
-APPBIN = heartbeat_client_X64
+APPBIN = KeepAliveClient_X64
 DEST_BIN = /mnt/hgfs/nfs_dir/share_dir/hb/KeepAliveClient
 endif
 

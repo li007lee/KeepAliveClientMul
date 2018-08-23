@@ -15,7 +15,5 @@
 
 //获取盒子到序列号
 HB_S32 get_sys_sn(HB_CHAR *sn, HB_S32 sn_size);
-//获取盒子信息
-HB_S32 get_dev_info();
 
 #endif /* SRC_DEV_OPT_H_ */

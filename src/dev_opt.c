@@ -7,7 +7,7 @@
 
 #include "common_args.h"
 #include "dev_opt.h"
-
+#if 0
 //根据网卡eth获取相应到mac地址
 static HB_S32 get_mac_dev(HB_CHAR *mac_sn, HB_CHAR *dev)
 {
@@ -47,7 +47,7 @@ HB_S32 get_sys_sn(HB_CHAR *sn, HB_S32 sn_size)
 	return 0;
 }
 
-
+#endif
 
 //获取盒子信息
 //HB_S32 get_dev_info()

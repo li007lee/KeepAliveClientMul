@@ -9,9 +9,7 @@
 #include "keepalive.h"
 #include "dev_opt.h"
 
-//GLOBLE_PARAM_OBJ glParam;
-HB_CHAR cSlaveIp[16] = {0};
-
+HB_CHAR cLocalIp[16] = {0};
 
 HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 {
@@ -20,12 +18,12 @@ HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 	HB_S32 iClientNums = 0;
 	if (argc < 3)
 	{
-		printf("Usage: ./heartbeat_client_X64 [SlaveIp] [Base个数] [每个Base中的客户端个数]\n\n");
+		printf("Usage: ./heartbeat_client_X64 [LocalIp] [Base个数] [每个Base中的客户端个数]\n\n");
 		return -1;
 	}
 	else
 	{
-		strncpy(cSlaveIp, argv[1], sizeof(cSlaveIp));
+		strncpy(cLocalIp, argv[1], sizeof(cLocalIp));
 		iBaseNums = atoi(argv[2]);
 		iClientNums = atoi(argv[3]);
 	}
@@ -50,24 +48,7 @@ HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 		return HB_FAILURE;
 	}
 
-
-//	memset(&glParam, 0, sizeof(glParam));
-//	glParam.pEventBase = event_base_new();
-//	if (!glParam.pEventBase)
-//	{
-//		perror("cmd_base event_base_new()");
-//		return HB_FAILURE;
-//	}
-//	//用于线程安全
-//	if(evthread_make_base_notifiable(glParam.pEventBase) != 0)
-//	{
-//		TRACE_ERR("###### evthread_make_base_notifiable() err!");
-//		return HB_FAILURE;
-//	}
-
-//	get_dev_info();
 	HB_S32 i = 0;
-//	pthread_t threadBaseId[16] = {-1};
 	for(i=0;i<iBaseNums;i++)
 	{
 		pthread_t threadBaseId = -1;
@@ -81,12 +62,6 @@ HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 	}
 
 //	pause();
-
-//
-//	keepalive_start(iClientNums);
-//
-//	event_base_dispatch(glParam.pEventBase);
-//	event_base_free(glParam.pEventBase);
 
 	return 0;
 }

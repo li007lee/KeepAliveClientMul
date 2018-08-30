@@ -9,8 +9,6 @@
 #include "keepalive.h"
 #include "dev_opt.h"
 
-HB_CHAR cLocalIp[16] = {0};
-
 HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 {
 
@@ -23,9 +21,8 @@ HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 	}
 	else
 	{
-		strncpy(cLocalIp, argv[1], sizeof(cLocalIp));
-		iBaseNums = atoi(argv[2]);
-		iClientNums = atoi(argv[3]);
+		iBaseNums = atoi(argv[1]);
+		iClientNums = atoi(argv[2]);
 	}
 
 	printf("----------------------------------------------------------------\n");
@@ -60,8 +57,5 @@ HB_S32 main(HB_S32 argc, HB_CHAR **argv)
 	{
 		sleep(60);
 	}
-
-//	pause();
-
 	return 0;
 }

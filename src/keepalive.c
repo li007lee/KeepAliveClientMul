@@ -505,6 +505,7 @@ HB_VOID *keepalive_start(HB_HANDLE hArg)
 		if (pEventArgs == NULL)
 		{
 			i--;
+			usleep(10000);
 			continue;
 		}
 		pEventArgs->pConnectToKeepAliveServerBev = NULL;
@@ -513,6 +514,14 @@ HB_VOID *keepalive_start(HB_HANDLE hArg)
 		pEventArgs->iKeepAliveServerPort = pThreadArgs->iKeepAliveServerPort;
 
 		struct bufferevent *pConnectToMasterServerBev = bufferevent_socket_new(pEventArgs->pEventBase, -1, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | BEV_OPT_THREADSAFE);
+		if (NULL == pConnectToMasterServerBev)
+		{
+			free(pEventArgs);
+			pEventArgs = NULL;
+			i--;
+			usleep(10000);
+			continue;
+		}
 		struct sockaddr_in stConnectToMasterServerAddr;
 		bzero(&stConnectToMasterServerAddr, sizeof(stConnectToMasterServerAddr));
 		stConnectToMasterServerAddr.sin_family = AF_INET;
@@ -522,26 +531,29 @@ HB_VOID *keepalive_start(HB_HANDLE hArg)
 
 //		bufferevent_setcb(pConnectToMasterServerBev, recv_msg_from_master_server_cb, NULL, connect_to_master_server_cb, pEventArgs);
 		bufferevent_setcb(pConnectToMasterServerBev, NULL, NULL, connect_to_master_server_cb, pEventArgs);
-		if (bufferevent_socket_connect(pConnectToMasterServerBev, (struct sockaddr*) &stConnectToMasterServerAddr, sizeof(struct sockaddr_in)) < 0)
-		{
-			free(pEventArgs);
-			pEventArgs = NULL;
-			bufferevent_free(pConnectToMasterServerBev);
-			pConnectToMasterServerBev = NULL;
-			i--;
-			continue;
-		}
 		if (bufferevent_enable(pConnectToMasterServerBev, 0) < 0)
 		{
+			TRACE_ERR("bufferevent_enable() err!");
 			free(pEventArgs);
 			pEventArgs = NULL;
 			bufferevent_free(pConnectToMasterServerBev);
 			pConnectToMasterServerBev = NULL;
 			i--;
+			usleep(10000);
 			continue;
 		}
-//		struct timeval tvReadTimeOut = {10, 0}; //5s连接超时
-//		bufferevent_set_timeouts(pConnectToMasterServerBev, NULL, &tvReadTimeOut);
+		if (bufferevent_socket_connect(pConnectToMasterServerBev, (struct sockaddr*) &stConnectToMasterServerAddr, sizeof(struct sockaddr_in)) < 0)
+		{
+			TRACE_ERR("bufferevent_socket_connect() err!");
+			free(pEventArgs);
+			pEventArgs = NULL;
+			bufferevent_free(pConnectToMasterServerBev);
+			pConnectToMasterServerBev = NULL;
+			i--;
+			usleep(10000);
+			continue;
+		}
+//		usleep(100);
 
 #if 0
 
@@ -588,7 +600,6 @@ HB_VOID *keepalive_start(HB_HANDLE hArg)
 		struct timeval tvConnectTimeOut = {5, 0}; //5s连接超时
 		bufferevent_set_timeouts(pbevConnectToKeepAliveServer, NULL, &tvConnectTimeOut);
 #endif
-		usleep(100);
 	}
 
 	return NULL;
@@ -617,9 +628,7 @@ HB_VOID *start_keep_alive_base(HB_HANDLE hArg)
 	pthread_t threadSelfId = pthread_self();
 	pthread_detach(threadSelfId);
 
-	static HB_S32 iFlag = 1;
-
-	int ret = random_number((HB_U32)threadSelfId, 1, 5);
+	int ret = random_number((HB_U32)threadSelfId, 1, 10);
 	printf("sleep time : %d\n", ret);
 	sleep(ret);
 
@@ -641,15 +650,6 @@ HB_VOID *start_keep_alive_base(HB_HANDLE hArg)
 	stThreadArgs.pEventBase = pEventBase;
 	stThreadArgs.threadSelfId = threadSelfId;
 	stThreadArgs.iClientNums = iClientNums;
-	if (iFlag)
-	{
-		stThreadArgs.iKeepAliveServerPort = 9003;
-		iFlag--;
-	}
-	else
-	{
-		stThreadArgs.iKeepAliveServerPort = SLAVE_SERVER_KEEP_ALAVE_PORT;
-	}
 
 	pthread_t threadKeepAliveId = -1;
 	pthread_create(&threadKeepAliveId, NULL, keepalive_start, &stThreadArgs);

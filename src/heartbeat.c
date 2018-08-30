@@ -62,8 +62,8 @@ HB_VOID send_heartbeat(evutil_socket_t fd, short events, HB_HANDLE hArg)
 	memcpy(cSendBuf, &stCmdHeader, sizeof(CMD_HEADER_OBJ));
 
 	bufferevent_setcb(pConnectToKeepAliveServerBev, recv_msg_from_slave_server_cb, NULL, send_heartbate_err_cb, pEventArgs);
-	bufferevent_write(pConnectToKeepAliveServerBev, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
 	bufferevent_enable(pConnectToKeepAliveServerBev, EV_READ);
+	bufferevent_write(pConnectToKeepAliveServerBev, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
 	struct timeval tvRecvTimeOut = {5, 0}; //设置读超时
 	bufferevent_set_timeouts(pConnectToKeepAliveServerBev, &tvRecvTimeOut, NULL);
 }

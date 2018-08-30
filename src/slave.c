@@ -8,7 +8,6 @@
 #include "slave.h"
 #include "heartbeat.h"
 
-extern HB_CHAR cLocalIp[16];
 HB_VOID func_connect_to_master_server_event(evutil_socket_t fd, HB_S16 events, HB_HANDLE hArg);
 
 //用于从Slave接收消息
@@ -63,12 +62,10 @@ HB_VOID recv_msg_from_slave_server_cb(struct bufferevent *pbevConnectToKeepAlive
 					break;
 				}
 				cJSON_Delete(pRoot);
-//				TRACE_LOG("Registe to Slave succeed! id=[%s]\n", pEventArgs->cDevId);
 	//			注册成功，创建定时器，定时发送心跳包
 				struct timeval tv = {HEARTBATE_TIME_VAL, 0};
 				event_assign(&pEventArgs->stHeartBeatTimerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT | EV_PERSIST, send_heartbeat, pEventArgs);
-//				event_add(&pEventArgs->stHeartBeatTimerEvent, &tv);
-				TRACE_LOG("Start send_heartbeat.. id=[%s] End event_add ret = %d\n", pEventArgs->cDevId, event_add(&pEventArgs->stHeartBeatTimerEvent, &tv));
+				TRACE_LOG("Registe to Slave succeed! id=[%s] End event_add ret = %d\n", pEventArgs->cDevId, event_add(&pEventArgs->stHeartBeatTimerEvent, &tv));
 
 			}
 			break;
@@ -84,7 +81,6 @@ HB_VOID recv_msg_from_slave_server_cb(struct bufferevent *pbevConnectToKeepAlive
 				}
 				cJSON_Delete(pRoot);
 //				printf("E_BOX_KEEP_ALIVE_REPLY recv reponse :[%s]\n", cRecvBuf+sizeof(CMD_HEADER_OBJ));
-//				bufferevent_set_timeouts(pbevConnectToKeepAliveServer, NULL, NULL);
 			}
 			break;
 			default:
@@ -96,6 +92,7 @@ HB_VOID recv_msg_from_slave_server_cb(struct bufferevent *pbevConnectToKeepAlive
 		if (iErrCode < 0)
 		{
 			TRACE_ERR("recv_msg_from_keepalive_server_cb recv err cmd : [%d]\n", iErrCode);
+			event_del(&pEventArgs->stHeartBeatTimerEvent);
 			if (NULL != pEventArgs->pConnectToKeepAliveServerBev)
 			{
 				bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
@@ -110,6 +107,40 @@ HB_VOID recv_msg_from_slave_server_cb(struct bufferevent *pbevConnectToKeepAlive
 	}
 }
 
+
+static HB_VOID recv_msg_from_slave_server_err_cb(struct bufferevent *pbevConnectToKeepAliveServer, HB_S16 what, HB_HANDLE hArg)
+{
+	HB_S32 err = EVUTIL_SOCKET_ERROR();
+	EVENT_ARGS_HANDLE pEventArgs = (EVENT_ARGS_HANDLE)hArg;
+
+	if (what & BEV_EVENT_TIMEOUT)//超时
+	{
+		TRACE_ERR("\n###########  recv_msg_from_slave_server_err_cb(%d) : send heartbeat  timeout(%s) !\n", err, evutil_socket_error_to_string(err));
+	}
+	else if (what & BEV_EVENT_ERROR)  //错误
+	{
+		TRACE_ERR("\n###########  recv_msg_from_slave_server_err_cb(%d) : send heartbeat failed(%s) !\n", err, evutil_socket_error_to_string(err));
+	}
+	else if (what & BEV_EVENT_EOF) //对端主动关闭
+	{
+		TRACE_YELLOW("\n###########  recv_msg_from_slave_server_err_cb(%d) : connection closed by peer(%s)!\n", err, evutil_socket_error_to_string(err));
+	}
+	else
+	{
+		TRACE_ERR("\n###########  recv_msg_from_slave_server_err_cb(%d) : (%s) !\n", err, evutil_socket_error_to_string(err));
+	}
+
+	if (NULL != pEventArgs->pConnectToKeepAliveServerBev)
+	{
+		bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
+		pEventArgs->pConnectToKeepAliveServerBev = NULL;
+	}
+
+	struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
+	event_assign(&pEventArgs->stConnectToKeepAliveServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_slave_server_event, pEventArgs);
+	event_add(&pEventArgs->stConnectToKeepAliveServerEvent, &tv);
+	printf("recv_msg_from_slave_server_err_cb() return !\n");
+}
 
 HB_VOID connect_to_slave_server_cb(struct bufferevent *pbevConnectToKeepAliveServer, HB_S16 what, HB_HANDLE hArg)
 {
@@ -131,9 +162,9 @@ HB_VOID connect_to_slave_server_cb(struct bufferevent *pbevConnectToKeepAliveSer
 		stCmdHeader.cmd_length = strlen(cSendBuf+sizeof(CMD_HEADER_OBJ));
 		memcpy(cSendBuf, &stCmdHeader, sizeof(CMD_HEADER_OBJ));
 
-		bufferevent_setcb(pEventArgs->pConnectToKeepAliveServerBev, recv_msg_from_slave_server_cb, NULL, connect_to_slave_server_cb, pEventArgs);
+		bufferevent_setcb(pEventArgs->pConnectToKeepAliveServerBev, recv_msg_from_slave_server_cb, NULL, recv_msg_from_slave_server_err_cb, pEventArgs);
 		//连接成功发送注册消息
-		bufferevent_write(pbevConnectToKeepAliveServer, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
+
 		if (bufferevent_enable(pbevConnectToKeepAliveServer, EV_READ) < 0)
 		{
 			if (pEventArgs->pConnectToKeepAliveServerBev != NULL)
@@ -144,13 +175,17 @@ HB_VOID connect_to_slave_server_cb(struct bufferevent *pbevConnectToKeepAliveSer
 			struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
 			event_assign(&pEventArgs->stConnectToKeepAliveServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_slave_server_event, pEventArgs);
 			printf("XXXXXXXXXXXXX connect to Slave bufferevent_enable... ret = %d\n", event_add(&pEventArgs->stConnectToKeepAliveServerEvent, &tv));
+			return ;
 		}
+
+		bufferevent_write(pbevConnectToKeepAliveServer, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
 		struct timeval tvReadTimeOut = {5, 0}; //5s读超时
 		bufferevent_set_timeouts(pEventArgs->pConnectToKeepAliveServerBev, &tvReadTimeOut, NULL);
 	}
 	else
 	{
 		printf("connect to slave event:0x%x \n", what);
+		event_del(&pEventArgs->stHeartBeatTimerEvent);
 
 		if (pEventArgs->pConnectToKeepAliveServerBev != NULL)
 		{
@@ -162,10 +197,10 @@ HB_VOID connect_to_slave_server_cb(struct bufferevent *pbevConnectToKeepAliveSer
 		if(pEventArgs->iConnectToKeepAliveServerErrTimes >= 3)
 		{
 			pEventArgs->iConnectToKeepAliveServerErrTimes = 0;
-			TRACE_ERR("Can't connect to keep alive server, get new keep alive server...\n");
+//			TRACE_ERR("Can't connect to keep alive server, get new keep alive server...\n");
 			struct timeval tv = {RECONNET_TO_MASTER_INTERVAL, 0};
 			event_assign(&pEventArgs->stConnectToMasterServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_master_server_event, pEventArgs);
-			printf("33333333 连接Master失败! 重连 ret=%d End!\n", event_add(&pEventArgs->stConnectToMasterServerEvent, &tv));
+			TRACE_ERR("33333333 连接Master失败! 重连 ret=%d End!\n", event_add(&pEventArgs->stConnectToMasterServerEvent, &tv));
 //			event_add(&pEventArgs->stConnectToMasterServerEvent, &tv);
 //			printf("Can't connect to keep alive server, get new keep alive server... End!\n");
 		}
@@ -174,9 +209,7 @@ HB_VOID connect_to_slave_server_cb(struct bufferevent *pbevConnectToKeepAliveSer
 			printf("connect to keep alive server failed! reconnect !\n");
 			struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
 			event_assign(&pEventArgs->stConnectToKeepAliveServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_slave_server_event, pEventArgs);
-//			event_add(&pEventArgs->stConnectToKeepAliveServerEvent, &tv);
 			printf("222222222222222 reconnect to Slave... ret = %d\n", event_add(&pEventArgs->stConnectToKeepAliveServerEvent, &tv));
-//			printf("connect to keep alive server failed! reconnect End!\n");
 		}
 	}
 }
@@ -186,19 +219,9 @@ HB_VOID func_connect_to_slave_server_event(evutil_socket_t fd, short events, voi
 {
 	EVENT_ARGS_HANDLE pEventArgs = (EVENT_ARGS_HANDLE)hArg;
 
-	HB_S32 iConnectToKeepAliveServerFd = socket(AF_INET,SOCK_STREAM,0);//返回-1表示失败;
-	struct sockaddr_in stConnectToKeepAliveServerAddr1;
-	HB_S32 iSize = sizeof(struct sockaddr_in);
-
-	bzero(&stConnectToKeepAliveServerAddr1,sizeof(stConnectToKeepAliveServerAddr1));
-	stConnectToKeepAliveServerAddr1.sin_family = AF_INET;
-	stConnectToKeepAliveServerAddr1.sin_port = htons(0); //服务器绑定的端口
-	stConnectToKeepAliveServerAddr1.sin_addr.s_addr = inet_addr(cLocalIp);//服务器的IP地址
-	bind(iConnectToKeepAliveServerFd,(struct sockaddr*)&stConnectToKeepAliveServerAddr1,iSize);//返回-1表示失败
-
 	if (NULL == pEventArgs->pConnectToKeepAliveServerBev)
 	{
-		pEventArgs->pConnectToKeepAliveServerBev = bufferevent_socket_new(pEventArgs->pEventBase, iConnectToKeepAliveServerFd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | BEV_OPT_THREADSAFE);
+		pEventArgs->pConnectToKeepAliveServerBev = bufferevent_socket_new(pEventArgs->pEventBase, -1, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | BEV_OPT_THREADSAFE);
 	}
 	struct sockaddr_in stConnectToKeepAliveServerAddr;
 	bzero(&stConnectToKeepAliveServerAddr, sizeof(stConnectToKeepAliveServerAddr));
@@ -208,19 +231,6 @@ HB_VOID func_connect_to_slave_server_event(evutil_socket_t fd, short events, voi
 	printf("connect to slave ServerIp[%s], ServerPort[%d]\n", pEventArgs->cKeepAliveServerIp, pEventArgs->iKeepAliveServerPort);
 
 	bufferevent_setcb(pEventArgs->pConnectToKeepAliveServerBev, recv_msg_from_slave_server_cb, NULL, connect_to_slave_server_cb, pEventArgs);
-	printf("000000connect to slave ServerIp[%s], ServerPort[%d]\n", pEventArgs->cKeepAliveServerIp, pEventArgs->iKeepAliveServerPort);
-	if (bufferevent_socket_connect(pEventArgs->pConnectToKeepAliveServerBev, (struct sockaddr*) &stConnectToKeepAliveServerAddr, sizeof(struct sockaddr_in)) < 0)
-	{
-		if (NULL != pEventArgs->pConnectToKeepAliveServerBev)
-		{
-			bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
-			pEventArgs->pConnectToKeepAliveServerBev = NULL;
-		}
-		struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
-		event_assign(&pEventArgs->stConnectToKeepAliveServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_slave_server_event, pEventArgs);
-		printf("000000000 reconnect to Slave... ret = %d\n", event_add(&pEventArgs->stConnectToKeepAliveServerEvent, &tv));
-		return ;
-	}
 	if (bufferevent_enable(pEventArgs->pConnectToKeepAliveServerBev, EV_READ | EV_WRITE) < 0)
 	{
 		if (NULL != pEventArgs->pConnectToKeepAliveServerBev)
@@ -233,9 +243,20 @@ HB_VOID func_connect_to_slave_server_event(evutil_socket_t fd, short events, voi
 		printf("111111 reconnect to Slave... ret = %d\n", event_add(&pEventArgs->stConnectToKeepAliveServerEvent, &tv));
 		return ;
 	}
-	printf("111111111connect to slave ServerIp[%s], ServerPort[%d]\n", pEventArgs->cKeepAliveServerIp, pEventArgs->iKeepAliveServerPort);
+	printf("----------------------connect to slave ServerIp[%s], ServerPort[%d]\n", pEventArgs->cKeepAliveServerIp, pEventArgs->iKeepAliveServerPort);
+	if (bufferevent_socket_connect(pEventArgs->pConnectToKeepAliveServerBev, (struct sockaddr*) &stConnectToKeepAliveServerAddr, sizeof(struct sockaddr_in)) < 0)
+	{
+		if (NULL != pEventArgs->pConnectToKeepAliveServerBev)
+		{
+			bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
+			pEventArgs->pConnectToKeepAliveServerBev = NULL;
+		}
+		struct timeval tv = {RECONNET_TO_SERVER_INTERVAL, 0};
+		event_assign(&pEventArgs->stConnectToKeepAliveServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_slave_server_event, pEventArgs);
+		printf("---------------------- reconnect to Slave... ret = %d\n", event_add(&pEventArgs->stConnectToKeepAliveServerEvent, &tv));
+		return ;
+	}
 	struct timeval tvConnectTimeOut = {5, 0}; //5s连接超时
 	bufferevent_set_timeouts(pEventArgs->pConnectToKeepAliveServerBev, NULL, &tvConnectTimeOut);
-	printf("22222222222connect to slave ServerIp[%s], ServerPort[%d]\n", pEventArgs->cKeepAliveServerIp, pEventArgs->iKeepAliveServerPort);
 }
 

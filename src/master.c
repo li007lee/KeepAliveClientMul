@@ -7,10 +7,7 @@
 
 #include "master.h"
 
-extern HB_CHAR cLocalIp[16];
-
 HB_VOID connect_to_slave_server_cb(struct bufferevent *pbevConnectToKeepAliveServer, HB_S16 what, HB_HANDLE hArg);
-HB_VOID recv_msg_from_slave_server_cb(struct bufferevent *pbevConnectToKeepAliveServer, HB_HANDLE hArg);
 
 
 //从master接收消息的回调函数
@@ -20,6 +17,8 @@ HB_VOID recv_msg_from_master_server_cb(struct bufferevent *pbevConnectToMasterSe
 	HB_CHAR cRecvBuf[1024] = { 0 };
 	EVENT_ARGS_HANDLE pEventArgs = (EVENT_ARGS_HANDLE)hArg;
 	HB_S32 iErrCode = 0;
+
+	bufferevent_disable(pbevConnectToMasterServer, EV_READ | EV_WRITE);
 #if 1
 	struct evbuffer *src = bufferevent_get_input(pbevConnectToMasterServer);//获取输入缓冲区
 	HB_S32 len = evbuffer_get_length(src);//获取输入缓冲区中数据的长度，也就是可以读取的长度。
@@ -62,25 +61,28 @@ HB_VOID recv_msg_from_master_server_cb(struct bufferevent *pbevConnectToMasterSe
 			else
 			{
 				cJSON_Delete(pRoot);
-				TRACE_ERR("从Master获取Slave失败!\n");
+				TRACE_ERR("从Master获取Slave IP失败!\n");
 				iErrCode = -1;
+				break;
+			}
+
+			cJSON *pSlavePort = cJSON_GetObjectItem(pRoot, "SlaveKeepAlivePort");
+			if (NULL != pSlaveIp)
+			{
+				pEventArgs->iKeepAliveServerPort = pSlavePort->valueint;
+			}
+			else
+			{
+				cJSON_Delete(pRoot);
+				TRACE_ERR("从Master获取Slave 端口失败!\n");
+				iErrCode = -2;
 				break;
 			}
 
 			cJSON_Delete(pRoot);
 			TRACE_LOG("从Master获取Slave地址成功 recv reponse :[%s]\n", cRecvBuf+sizeof(CMD_HEADER_OBJ));
-
-			HB_S32 iConnectToKeepAliveServerFd = socket(AF_INET,SOCK_STREAM,0);//返回-1表示失败;
-			struct sockaddr_in stConnectToKeepAliveServerAddr1;
-			HB_S32 iSize = sizeof(struct sockaddr_in);
-
-			bzero(&stConnectToKeepAliveServerAddr1,sizeof(stConnectToKeepAliveServerAddr1));
-			stConnectToKeepAliveServerAddr1.sin_family = AF_INET;
-			stConnectToKeepAliveServerAddr1.sin_port = htons(0); //服务器绑定的端口
-			stConnectToKeepAliveServerAddr1.sin_addr.s_addr = inet_addr(cLocalIp);//服务器的IP地址
-			bind(iConnectToKeepAliveServerFd,(struct sockaddr*)&stConnectToKeepAliveServerAddr1,iSize);//返回-1表示失败
-
-			pEventArgs->pConnectToKeepAliveServerBev = bufferevent_socket_new(pEventArgs->pEventBase, iConnectToKeepAliveServerFd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | BEV_OPT_THREADSAFE);
+#if 1
+			pEventArgs->pConnectToKeepAliveServerBev = bufferevent_socket_new(pEventArgs->pEventBase, -1, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | BEV_OPT_THREADSAFE);
 			struct sockaddr_in stConnectToKeepAliveServerAddr;
 			bzero(&stConnectToKeepAliveServerAddr, sizeof(stConnectToKeepAliveServerAddr));
 			stConnectToKeepAliveServerAddr.sin_family = AF_INET;
@@ -88,16 +90,7 @@ HB_VOID recv_msg_from_master_server_cb(struct bufferevent *pbevConnectToMasterSe
 			inet_pton(AF_INET, pEventArgs->cKeepAliveServerIp, (void *) &stConnectToKeepAliveServerAddr.sin_addr);
 			printf("connect to slave ServerIp[%s], ServerPort[%d]\n", pEventArgs->cKeepAliveServerIp, pEventArgs->iKeepAliveServerPort);
 
-//			bufferevent_setcb(pEventArgs->pConnectToKeepAliveServerBev, recv_msg_from_slave_server_cb, NULL, connect_to_slave_server_cb, pEventArgs);
 			bufferevent_setcb(pEventArgs->pConnectToKeepAliveServerBev, NULL, NULL, connect_to_slave_server_cb, pEventArgs);
-
-			if (bufferevent_socket_connect(pEventArgs->pConnectToKeepAliveServerBev, (struct sockaddr*) &stConnectToKeepAliveServerAddr, sizeof(struct sockaddr_in)) < 0)
-			{
-				bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
-				pEventArgs->pConnectToKeepAliveServerBev = NULL;
-				iErrCode = -3;
-				break;
-			}
 			if (bufferevent_enable(pEventArgs->pConnectToKeepAliveServerBev, 0) < 0)
 			{
 				bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
@@ -105,11 +98,19 @@ HB_VOID recv_msg_from_master_server_cb(struct bufferevent *pbevConnectToMasterSe
 				iErrCode = -4;
 				break;
 			}
+			if (bufferevent_socket_connect(pEventArgs->pConnectToKeepAliveServerBev, (struct sockaddr*) &stConnectToKeepAliveServerAddr, sizeof(struct sockaddr_in)) < 0)
+			{
+				bufferevent_free(pEventArgs->pConnectToKeepAliveServerBev);
+				pEventArgs->pConnectToKeepAliveServerBev = NULL;
+				iErrCode = -3;
+				break;
+			}
+#endif
 			printf("------------>connect to slave ServerIp[%s], ServerPort[%d] End!\n", pEventArgs->cKeepAliveServerIp, pEventArgs->iKeepAliveServerPort);
 		}
 		break;
 		default:
-			TRACE_ERR("default recv reponse :[%s]\n", cRecvBuf+sizeof(CMD_HEADER_OBJ));
+			TRACE_ERR("default recv reponse[%d] :[%s]\n", stCmdHeader.cmd_func, cRecvBuf+sizeof(CMD_HEADER_OBJ));
 			iErrCode = -5;
 			break;
 	}
@@ -132,8 +133,6 @@ HB_VOID connect_to_master_server_cb(struct bufferevent *pConnectToMasterServerBe
 {
 	EVENT_ARGS_HANDLE pEventArgs = (EVENT_ARGS_HANDLE)hArg;
 
-	printf("^^^^^^^^^^^^^^^^^^^^ event:0x%x \n", event);
-
 	if (event & BEV_EVENT_CONNECTED)
 	{
 		HB_CHAR cSendBuf[512] = {0};
@@ -150,11 +149,7 @@ HB_VOID connect_to_master_server_cb(struct bufferevent *pConnectToMasterServerBe
 		printf("++++++++++++++++++++++++++++++++++++Send to Master : [%s]\n", cSendBuf+sizeof(CMD_HEADER_OBJ));
 
 		bufferevent_setcb(pConnectToMasterServerBev, recv_msg_from_master_server_cb, NULL, connect_to_master_server_cb, pEventArgs);
-		//连接成功发送注册消息
-		bufferevent_write(pConnectToMasterServerBev, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
-		struct timeval tvReadTimeOut = {5, 0}; //5s读超时
-		bufferevent_set_timeouts(pConnectToMasterServerBev, &tvReadTimeOut, NULL);
-		if (bufferevent_enable(pConnectToMasterServerBev, EV_READ | EV_WRITE) < 0)
+		if (bufferevent_enable(pConnectToMasterServerBev, EV_READ) < 0)
 		{
 			printf("000连接Master bufferevent_enable 失败! 重连 DevId=[%s]!\n", pEventArgs->cDevId);
 			bufferevent_free(pConnectToMasterServerBev);
@@ -162,16 +157,21 @@ HB_VOID connect_to_master_server_cb(struct bufferevent *pConnectToMasterServerBe
 			struct timeval tv = {RECONNET_TO_MASTER_INTERVAL, 0};
 			event_assign(&pEventArgs->stConnectToMasterServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_master_server_event, pEventArgs);
 			printf("000连接Master bufferevent_enable失败! 重连 ret=%d End DevId=[%s]!\n", event_add(&pEventArgs->stConnectToMasterServerEvent, &tv), pEventArgs->cDevId);
+			return;
 		}
+		struct timeval tvReadTimeOut = {15, 0}; //5s读超时
+		bufferevent_set_timeouts(pConnectToMasterServerBev, &tvReadTimeOut, NULL);
+		//连接成功发送注册消息
+		bufferevent_write(pConnectToMasterServerBev, cSendBuf, sizeof(stCmdHeader)+stCmdHeader.cmd_length);
 	}
 	else
 	{
-		printf("连接Master失败! 重连 DevId=[%s]!\n", pEventArgs->cDevId);
+		TRACE_ERR("连接Master失败! 重连 DevId=[%s] err_code=(0X%x)!\n", pEventArgs->cDevId, event);
 		bufferevent_free(pConnectToMasterServerBev);
 		pConnectToMasterServerBev = NULL;
 		struct timeval tv = {RECONNET_TO_MASTER_INTERVAL, 0};
 		event_assign(&pEventArgs->stConnectToMasterServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_master_server_event, pEventArgs);
-		printf("连接Master失败! 重连 ret=%d End DevId=[%s]!\n", event_add(&pEventArgs->stConnectToMasterServerEvent, &tv), pEventArgs->cDevId);
+		TRACE_ERR("连接Master失败! 重连 ret=%d End DevId=[%s]!\n", event_add(&pEventArgs->stConnectToMasterServerEvent, &tv), pEventArgs->cDevId);
 	}
 }
 
@@ -187,11 +187,9 @@ HB_VOID func_connect_to_master_server_event(evutil_socket_t fd, HB_S16 events, H
 	stConnectToMasterServerAddr.sin_family = AF_INET;
 	stConnectToMasterServerAddr.sin_port = htons(MASTER_SERVER_PORT);
 	inet_pton(AF_INET, MASTER_SERVER_IP, (void *) &stConnectToMasterServerAddr.sin_addr);
-	printf("############ Connect to master ServerIp[%s], ServerPort[%d]\n", MASTER_SERVER_IP, MASTER_SERVER_PORT);
+	printf("############ func_connect_to_master_server_event() Connect to master ServerIp[%s], ServerPort[%d]\n", MASTER_SERVER_IP, MASTER_SERVER_PORT);
 
-//	bufferevent_setcb(pConnectToMasterServerBev, recv_msg_from_master_server_cb, NULL, connect_to_master_server_cb, pEventArgs);
 	bufferevent_setcb(pConnectToMasterServerBev, NULL, NULL, connect_to_master_server_cb, pEventArgs);
-//	if (bufferevent_enable(pConnectToMasterServerBev, EV_READ | EV_WRITE) < 0)
 	if (bufferevent_enable(pConnectToMasterServerBev, 0) < 0)
 	{
 		bufferevent_free(pConnectToMasterServerBev);
@@ -199,7 +197,6 @@ HB_VOID func_connect_to_master_server_event(evutil_socket_t fd, HB_S16 events, H
 		struct timeval tv = {RECONNET_TO_MASTER_INTERVAL, 0};
 		event_assign(&pEventArgs->stConnectToMasterServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_master_server_event, pEventArgs);
 		printf("11111111111111 连接Master失败! 重连 ret=%d End!\n", event_add(&pEventArgs->stConnectToMasterServerEvent, &tv));
-//		event_add(&pEventArgs->stConnectToMasterServerEvent, &tv);
 		return ;
 	}
 
@@ -210,11 +207,8 @@ HB_VOID func_connect_to_master_server_event(evutil_socket_t fd, HB_S16 events, H
 		struct timeval tv = {RECONNET_TO_MASTER_INTERVAL, 0};
 		event_assign(&pEventArgs->stConnectToMasterServerEvent, pEventArgs->pEventBase, -1, EV_TIMEOUT, func_connect_to_master_server_event, pEventArgs);
 		printf("000000000  连接Master失败! 重连 ret=%d End!\n", event_add(&pEventArgs->stConnectToMasterServerEvent, &tv));
-//		event_add(&pEventArgs->stConnectToMasterServerEvent, &tv);
 		return ;
 	}
-//	struct timeval tvConnectTimeOut = {5, 0}; //5s连接超时
-//	bufferevent_set_timeouts(pConnectToMasterServerBev, NULL, &tvConnectTimeOut);
 }
 
 
